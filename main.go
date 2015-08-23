@@ -32,29 +32,8 @@ func main() {
 	// SSA Information
 	ssaprog := ssautil.CreateProgram(prog, ssa.GlobalDebug)
 	ssaprog.BuildAll()
-	pkgs := ssaprog.AllPackages()
-	if debug {
-		for _, p := range pkgs {
-			if p.Object.Name() == "main" {
-				f := p.Func("main")
-				if f == nil {
-					log.Fatal("Could not find function")
-				}
-				for _, inst := range f.Blocks[0].Instrs {
-					if v, ok := inst.(ssa.Value); ok {
-						fmt.Println(v.Name())
-						fmt.Printf("  (type)\t%v\n", v.Type())
-						fmt.Printf("  (inst)\t%v\n", inst)
-						fmt.Printf("  (referrers)\t%v\n", v.Referrers())
-						fmt.Printf("  (pos)\t%v\n", v.Pos())
-						fmt.Printf("  (debug)\t%#v\n", v)
-					}
-				}
-			}
-		}
-		fmt.Println()
-	}
 
+	fail := false
 	// The real meat of things...
 	// Create a mapping from Defs to ssa.Values
 	// Make sure that each
@@ -90,18 +69,12 @@ func main() {
 			}
 		}
 		if !hasRef {
+			fail = true
 			fmt.Fprintf(os.Stderr, "Unused assignment for `%v` %v\n", expr, fset.Position(expr.Pos()))
 		}
 
 	}
+	if fail {
+		os.Exit(1)
+	}
 }
-
-const src = `package main
-
-import "fmt"
-
-func main() {
-        _, err := fmt.Println("Hello")
-        _, err = fmt.Println(err)
-}
-`
