@@ -29,14 +29,10 @@ func main() {
 	info := prog.Package(os.Args[1]).Info
 	fset := prog.Fset
 
-	// SSA Information
 	ssaprog := ssautil.CreateProgram(prog, ssa.GlobalDebug)
 	ssaprog.BuildAll()
 
 	fail := false
-	// The real meat of things...
-	// Create a mapping from Defs to ssa.Values
-	// Make sure that each
 	for expr, object := range info.Uses {
 		if _, ok := object.(*types.Var); !ok {
 			continue
@@ -45,10 +41,24 @@ func main() {
 		_ = exact // FIXME
 		spkg := ssaprog.Package(pkg.Pkg)
 		f := ssa.EnclosingFunction(spkg, node)
-
+		if f == nil {
+			fmt.Printf("Unknown function %v %v %v %v\n", fset.Position(expr.Pos()), object, pkg, prog)
+			continue
+		}
 		value, _ := f.ValueForExpr(expr)
+		// Unwrap unops and grab the value inside
+		if v, ok := value.(*ssa.UnOp); ok {
+			//fmt.Println("Unwrapping unop")
+			value = v.X
+		}
 		if debug {
-			fmt.Printf("%v %v: %v      %v\n", fset.Position(expr.Pos()), expr, object, value)
+			fmt.Printf("%v %v: %v      %#v\n", fset.Position(expr.Pos()), expr, object, value)
+		}
+		if _, ok := value.(*ssa.Global); ok {
+			if debug {
+				fmt.Printf("     is global\n")
+			}
+			continue
 		}
 		if value == nil {
 			continue
