@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/token"
 	"log"
 	"os"
 
@@ -12,8 +14,6 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 	"golang.org/x/tools/go/types"
 )
-
-const debug = false
 
 const usage = `
 '%[1]s' finds unused assignements in your code.
@@ -75,56 +75,85 @@ func myloader(args []string) (failed bool) {
 	ssaprog.Build()
 
 	fail := false
+	for expr, object := range info.Defs {
+		unused := checkObj(expr, object, prog, ssaprog, fset)
+		if unused {
+			fmt.Fprintf(os.Stderr, "Unused assignment for '%v' %v\n", expr, fset.Position(expr.Pos()))
+		}
+		fail = fail || unused
+	}
 	for expr, object := range info.Uses {
-		if _, ok := object.(*types.Var); !ok {
-			continue
+		unused := checkObj(expr, object, prog, ssaprog, fset)
+		if unused {
+			fmt.Fprintf(os.Stderr, "Unused assignment for '%v' %v\n", expr, fset.Position(expr.Pos()))
 		}
-		pkg, node, _ := prog.PathEnclosingInterval(expr.Pos(), expr.End())
-		spkg := ssaprog.Package(pkg.Pkg)
-		f := ssa.EnclosingFunction(spkg, node)
-		if f == nil {
-			fmt.Printf("Unknown function %v %v %v %v\n", fset.Position(expr.Pos()), object, pkg, prog)
-			continue
-		}
-		value, _ := f.ValueForExpr(expr)
-		// Unwrap unops and grab the value inside
-		if v, ok := value.(*ssa.UnOp); ok {
-			if debug {
-				fmt.Println("Unwrapping unop")
-			}
-			value = v.X
-		}
-		if debug {
-			fmt.Printf("%v %v: %v      %#v\n", fset.Position(expr.Pos()), expr, object, value)
-		}
-		if _, ok := value.(*ssa.Global); ok {
-			if debug {
-				fmt.Printf("     is global\n")
-			}
-			continue
-		}
-		if value == nil {
-			continue
-		}
-		refs := value.Referrers()
-		if refs == nil {
-			continue
-		}
-		if debug {
-			fmt.Printf("   (refs) %v\n", refs)
-		}
-		hasRef := false
-		for _, r := range *refs {
-			_, ok := r.(*ssa.DebugRef)
-			hasRef = hasRef || !ok
-			if debug && !ok {
-				fmt.Printf("%v %v: %v      %v\n", fset.Position(expr.Pos()), expr, object, r)
-			}
-		}
-		if !hasRef {
-			fail = true
-			fmt.Fprintf(os.Stderr, "Unused assignment for `%v` %v\n", expr, fset.Position(expr.Pos()))
-		}
+		fail = fail || unused
 	}
 	return fail
+}
+
+const debug = false
+
+// Returns true if unused
+func checkObj(expr *ast.Ident, object types.Object, prog *loader.Program, ssaprog *ssa.Program, fset *token.FileSet) (unused bool) {
+	if _, ok := object.(*types.Var); !ok {
+		if debug {
+			fmt.Println("Skipping object", object)
+		}
+		return false
+	}
+	pkg, node, _ := prog.PathEnclosingInterval(expr.Pos(), expr.End())
+	spkg := ssaprog.Package(pkg.Pkg)
+	f := ssa.EnclosingFunction(spkg, node)
+	if f == nil {
+		if debug {
+			fmt.Printf("Unknown function %v %v %v %v\n", fset.Position(expr.Pos()), object, pkg, prog)
+		}
+		return false
+	}
+	value, _ := f.ValueForExpr(expr)
+	// Unwrap unops and grab the value inside
+	if v, ok := value.(*ssa.UnOp); ok {
+		if debug {
+			fmt.Println("Unwrapping unop")
+		}
+		value = v.X
+	}
+	if debug {
+		fmt.Printf("%v %v: %v      %#v\n", fset.Position(expr.Pos()), expr, object, value)
+	}
+	if _, ok := value.(*ssa.Global); ok {
+		if debug {
+			fmt.Printf("     is global\n")
+		}
+		return false
+	}
+	if value == nil {
+		if debug {
+			fmt.Println("Value is nil", object)
+		}
+		return false
+	}
+	refs := value.Referrers()
+	if refs == nil {
+		if debug {
+			fmt.Println("Referrers is nil", object)
+		}
+		return false
+	}
+	if debug {
+		fmt.Printf("   (refs) %v\n", refs)
+	}
+	hasRef := false
+	for _, r := range *refs {
+		_, ok := r.(*ssa.DebugRef)
+		hasRef = hasRef || !ok
+		if debug && !ok {
+			fmt.Printf("%v %v: %v      %v\n", fset.Position(expr.Pos()), expr, object, r)
+		}
+	}
+	if !hasRef {
+		unused = true
+	}
+	return unused
 }
