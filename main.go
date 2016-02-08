@@ -49,14 +49,14 @@ func main() {
 	}
 	flag.Parse()
 
-	fail := myloader(flag.Args())
-	if fail {
+	count := myloader(flag.Args())
+	if count > 0 {
 		os.Exit(1)
 	}
 }
 
-// Return true if an unused var is found
-func myloader(args []string) (failed bool) {
+// Return count of unused vars
+func myloader(args []string) (count int) {
 	var conf loader.Config
 	conf.FromArgs(args, false)
 	prog, err := conf.Load()
@@ -74,22 +74,21 @@ func myloader(args []string) (failed bool) {
 	ssaprog := ssautil.CreateProgram(prog, ssa.GlobalDebug)
 	ssaprog.Build()
 
-	fail := false
 	for expr, object := range info.Defs {
 		unused := checkObj(expr, object, prog, ssaprog, fset)
 		if unused {
 			fmt.Fprintf(os.Stderr, "Unused assignment for '%v' %v\n", expr, fset.Position(expr.Pos()))
+			count++
 		}
-		fail = fail || unused
 	}
 	for expr, object := range info.Uses {
 		unused := checkObj(expr, object, prog, ssaprog, fset)
 		if unused {
 			fmt.Fprintf(os.Stderr, "Unused assignment for '%v' %v\n", expr, fset.Position(expr.Pos()))
+			count++
 		}
-		fail = fail || unused
 	}
-	return fail
+	return count
 }
 
 const debug = false
