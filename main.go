@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -14,9 +15,50 @@ import (
 
 const debug = false
 
+const usage = `
+'%[1]s' finds unused assignements in your code.
+
+The compiler checks for unused variables, but sometimes assignments
+are never read before getting overwriten or ignored.  For example this
+code:
+
+   package main
+
+   import "fmt"
+
+   func main() {
+        _, err := fmt.Println("Hello")
+        _, err = fmt.Println(" world")
+        _, err = fmt.Println(err)
+   }
+
+The err variable is used so the compiler does not complain, but the
+first and third assignment to the err variable are never checked.
+'%[1]s' finds that mistake as follows:
+
+   $ %[1]s ./testdata/
+   Unused assignment for 'err' ./testdata/test.go:6:5
+   Unused assignment for 'err' ./testdata/test.go:8:5
+   $ echo $?
+   1
+`
+
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, usage, os.Args[0])
+	}
+	flag.Parse()
+
+	fail := myloader(flag.Args())
+	if fail {
+		os.Exit(1)
+	}
+}
+
+// Return true if an unused var is found
+func myloader(args []string) (failed bool) {
 	var conf loader.Config
-	conf.FromArgs(os.Args[1:], false)
+	conf.FromArgs(args, false)
 	prog, err := conf.Load()
 	if err != nil {
 		log.Fatal(err)
@@ -26,19 +68,18 @@ func main() {
 		fmt.Println(pi)
 	}
 
-	info := prog.Package(os.Args[1]).Info
+	info := prog.Package(args[0]).Info
 	fset := prog.Fset
 
 	ssaprog := ssautil.CreateProgram(prog, ssa.GlobalDebug)
-	ssaprog.BuildAll()
+	ssaprog.Build()
 
 	fail := false
 	for expr, object := range info.Uses {
 		if _, ok := object.(*types.Var); !ok {
 			continue
 		}
-		pkg, node, exact := prog.PathEnclosingInterval(expr.Pos(), expr.End())
-		_ = exact // FIXME
+		pkg, node, _ := prog.PathEnclosingInterval(expr.Pos(), expr.End())
 		spkg := ssaprog.Package(pkg.Pkg)
 		f := ssa.EnclosingFunction(spkg, node)
 		if f == nil {
@@ -48,7 +89,9 @@ func main() {
 		value, _ := f.ValueForExpr(expr)
 		// Unwrap unops and grab the value inside
 		if v, ok := value.(*ssa.UnOp); ok {
-			//fmt.Println("Unwrapping unop")
+			if debug {
+				fmt.Println("Unwrapping unop")
+			}
 			value = v.X
 		}
 		if debug {
@@ -82,9 +125,6 @@ func main() {
 			fail = true
 			fmt.Fprintf(os.Stderr, "Unused assignment for `%v` %v\n", expr, fset.Position(expr.Pos()))
 		}
-
 	}
-	if fail {
-		os.Exit(1)
-	}
+	return fail
 }
