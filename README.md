@@ -1,7 +1,7 @@
 
 # .
 
-'gounused' finds unused assignements in your code.
+'gounused' finds unused assignments in your code.
 
 The compiler checks for unused variables, but sometimes assignments
 are never read before getting overwriten or ignored.  For example this
